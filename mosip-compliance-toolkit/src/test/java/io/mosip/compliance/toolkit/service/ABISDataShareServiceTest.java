@@ -3,10 +3,7 @@ package io.mosip.compliance.toolkit.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.mosip.commons.khazana.spi.ObjectStoreAdapter;
 import io.mosip.compliance.toolkit.constants.AppConstants;
-import io.mosip.compliance.toolkit.dto.abis.DataShareExpireRequest;
-import io.mosip.compliance.toolkit.dto.abis.DataShareRequestDto;
-import io.mosip.compliance.toolkit.dto.abis.DataShareResponseWrapperDto;
-import io.mosip.compliance.toolkit.dto.abis.DataShareSaveTokenRequest;
+import io.mosip.compliance.toolkit.dto.abis.*;
 import io.mosip.compliance.toolkit.entity.AbisDataShareTokenEntity;
 import io.mosip.compliance.toolkit.repository.AbisDataShareTokenRepository;
 import io.mosip.compliance.toolkit.repository.BiometricTestDataRepository;
@@ -16,6 +13,7 @@ import io.mosip.kernel.core.authmanager.authadapter.model.AuthUserDetails;
 import io.mosip.kernel.core.authmanager.authadapter.model.MosipUserDto;
 import io.mosip.kernel.core.http.RequestWrapper;
 import io.mosip.kernel.core.http.ResponseWrapper;
+import org.apache.http.cookie.Cookie;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -34,14 +32,20 @@ import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
 import java.util.Optional;
 
+import static io.restassured.RestAssured.given;
 import static junit.framework.TestCase.assertEquals;
 import static org.codehaus.groovy.runtime.DefaultGroovyMethods.any;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
+
 
 @ContextConfiguration(classes = {TestContext.class, WebApplicationContext.class})
 @RunWith(SpringRunner.class)
@@ -136,6 +140,20 @@ public class ABISDataShareServiceTest {
         abisDataShareService.expireDataShareUrl(dataShareExpireRequest);
     }
 
+    @Test
+    public void testCreateDataShareUrl_AbisProjectModalityNotNull() throws Exception {
+        DataShareRequestDto dataShareRequestDto = new DataShareRequestDto();
+        dataShareRequestDto.setAbisProjectModality("Modality1");
+
+        when(testCasesService.getPartnerTestDataStream(Mockito.any(), Mockito.any(), Mockito.any())).thenReturn(mock(InputStream.class));
+        when(testCasesService.getDefaultTestDataStream(Mockito.any())).thenReturn(mock(InputStream.class));
+
+        ResponseWrapper<DataShareResponseWrapperDto> responseWrapper = abisDataShareService.createDataShareUrl(dataShareRequestDto);
+
+        assertNotNull(responseWrapper.getResponse());
+
+    }
+
     /*
      * These functions test the saveDataShareToken method
      */
@@ -186,6 +204,29 @@ public class ABISDataShareServiceTest {
 
         verify(abisDataShareTokenRepository, Mockito.times(1)).save(
                 Mockito.any(AbisDataShareTokenEntity.class));
+    }
+
+    @Test
+    public void testSaveDataShareToken_CatchBlock() {
+        RequestWrapper<DataShareSaveTokenRequest> requestWrapper = new RequestWrapper<>();
+        DataShareSaveTokenRequest dataShareSaveTokenRequest = new DataShareSaveTokenRequest();
+        dataShareSaveTokenRequest.setPartnerId("1234");
+        dataShareSaveTokenRequest.setCtkTestCaseId("5678");
+        dataShareSaveTokenRequest.setCtkTestRunId("9012");
+        dataShareSaveTokenRequest.setToken("token");
+        requestWrapper.setRequest(dataShareSaveTokenRequest);
+
+        when(abisDataShareTokenRepository.findTokenForTestRun(Mockito.anyString(), Mockito.anyString(), Mockito.anyString()))
+                .thenThrow(new RuntimeException("Error occurred"));
+
+        ResponseWrapper<String> responseWrapper = abisDataShareService.saveDataShareToken(requestWrapper);
+
+        assertEquals(AppConstants.FAILURE, responseWrapper.getResponse());
+        assertEquals(1, responseWrapper.getErrors().size());
+        assertEquals("Error occurred", responseWrapper.getErrors().get(0).getMessage());
+
+        verify(abisDataShareTokenRepository).findTokenForTestRun(Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
+        verifyNoMoreInteractions(abisDataShareTokenRepository);
     }
 
     @Test
